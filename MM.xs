@@ -23,6 +23,22 @@ int arg;
 {
     errno = 0;
     switch (*name) {
+
+    case 'M':
+        if (strEQ(name, "MM_LOCK_RD"))
+#ifdef MM_LOCK_RD
+            return MM_LOCK_RD;
+#else
+            goto not_there;
+#endif
+
+        if (strEQ(name, "MM_LOCK_RW"))
+#ifdef MM_LOCK_RW
+            return MM_LOCK_RW;
+#else
+            goto not_there;
+#endif
+
     }
     errno = EINVAL;
     return 0;
@@ -433,6 +449,344 @@ SV *mm_btree_table_next_key(mm_btree *btree, char *key)
 }
 
 
+/* ==================================================================
+
+   A hash implementation using mm.
+
+   ==================================================================
+*/
+
+#define HASHSIZE 101
+
+/* hash */
+struct mm_hash_elt;
+typedef struct mm_hash_elt mm_hash_elt;
+
+typedef struct {
+	MM *mm;
+	mm_hash_elt *hashtab[HASHSIZE];
+} mm_hash;
+
+/* hash element */
+struct mm_hash_elt {
+	struct mm_hash_elt *next;
+	char *key;
+	char *val;
+	size_t val_len;
+};
+
+/* The hashing function uses perl's hashing function. */
+#define MM_HASH(hash,str,len) \
+	PERL_HASH(hash,str,len); \
+	hash %= HASHSIZE;
+
+
+/* ---------------------------------------------------------------------
+   mm_make_hash
+
+   Initializes a new hash.
+   ---------------------------------------------------------------------
+*/
+
+mm_hash *mm_make_hash(MM *mm)
+{
+	mm_hash *hash;
+
+	hash = mm_calloc(mm, 1, sizeof(mm_hash));
+	if (!hash)
+		return(0);
+
+	hash->mm = mm;
+
+	return(hash);
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_get
+
+   Returns the hash_elt pointer of a specified key in a hash.
+   For internal use only.
+   ---------------------------------------------------------------------
+*/
+
+mm_hash_elt *mm_hash_get(mm_hash *hash, void *key)
+{
+	mm_hash_elt *elt;
+	unsigned int idx;
+
+	MM_HASH(idx, key, strlen(key));
+
+	for (elt = hash->hashtab[idx]; elt != NULL; elt = elt->next)
+		if (strcmp(key, elt->key) == 0)
+			return elt;
+
+	return NULL;
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_get_value
+
+   Returns the value of a specified hash element.
+   ---------------------------------------------------------------------
+*/
+
+SV *mm_hash_get_value(mm_hash *hash, char *key)
+{
+	mm_hash_elt *elt;
+	SV *ret = &sv_undef;
+
+	if (mm_lock(hash->mm, MM_LOCK_RD)) {
+		elt = mm_hash_get(hash, key);
+		if ((elt != NULL) && (elt->val != NULL))
+			ret = newSVpv(elt->val, elt->val_len);
+		mm_unlock(hash->mm);
+	}
+	return (ret);
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_exists
+
+   Returns whether a specified key exists in a hash.
+   ---------------------------------------------------------------------
+*/
+
+SV *mm_hash_exists(mm_hash *hash, char *key)
+{
+	mm_hash_elt *elt;
+	SV *ret = &sv_no;
+
+	if (mm_lock(hash->mm, MM_LOCK_RD)) {
+		elt = mm_hash_get(hash, key);
+		if (elt != NULL)
+			ret = &sv_yes;
+		mm_unlock(hash->mm);
+	}
+
+	return (ret);
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_remove
+
+   Removes an element from a hash.
+   For internal use only.
+   ---------------------------------------------------------------------
+*/
+
+void mm_hash_remove(mm_hash *hash, void *key)
+{
+	mm_hash_elt *elt, *prev;
+	unsigned int idx;
+
+	MM_HASH(idx, key, strlen(key));
+
+	for (elt = hash->hashtab[idx], prev = NULL; elt != NULL;
+	     prev = elt, elt = elt->next)
+
+		if (strcmp(key, elt->key) == 0) {
+
+			if (prev == NULL) {
+				hash->hashtab[idx] = elt->next;
+			} else {
+				prev->next = elt->next;
+			}
+
+			mm_free(hash->mm, elt->val);
+			mm_free(hash->mm, elt->key);
+			mm_free(hash->mm, elt);
+			break;
+		}
+
+	return;
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_insert
+
+   Inserts an element into a hash.
+   ---------------------------------------------------------------------
+*/
+
+int mm_hash_insert(mm_hash *hash, char *key, SV *val)
+{
+	mm_hash_elt *elt;
+	unsigned int idx;
+	void *data;
+
+	elt = mm_calloc(hash->mm, 1, sizeof(mm_hash_elt));
+	if (!elt)
+		return(0);
+
+	elt->key = mm_strdup(hash->mm, key);
+	if (!elt->key) {
+		mm_free(hash->mm, elt);
+		return(0);
+	}
+
+	data = SvPV(val, elt->val_len);
+	/* elt->val = mm_strdup(hash->mm, data); */
+	elt->val = mm_malloc(hash->mm, elt->val_len);
+	if (!elt->val) {
+		mm_free(hash->mm, elt->key);
+		mm_free(hash->mm, elt);
+		return(0);
+	}
+	memcpy(elt->val, data, elt->val_len);
+
+
+	if (mm_lock(hash->mm, MM_LOCK_RW)) {
+
+		mm_hash_remove(hash, key);
+
+		MM_HASH(idx, key, strlen(key));
+		elt->next = hash->hashtab[idx];
+		hash->hashtab[idx] = elt;
+		mm_unlock(hash->mm);
+	}
+
+	return(1);
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_delete
+
+   Deletes an element from a hash.
+   ---------------------------------------------------------------------
+*/
+
+SV *mm_hash_delete(mm_hash *hash, char *key)
+{
+	SV *ret = &sv_undef;
+
+	if (mm_lock(hash->mm, MM_LOCK_RW)) {
+		mm_hash_remove(hash, key);
+		mm_unlock(hash->mm);
+	}
+	return(ret); /* XXX */
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_clear
+
+   Deletes all elements in a hash.
+   ---------------------------------------------------------------------
+*/
+
+void mm_hash_clear(mm_hash *hash)
+{
+	mm_hash_elt *elt, *elt_next;
+	unsigned int idx;
+
+	if (mm_lock(hash->mm, MM_LOCK_RW)) {
+
+		for (idx = 0; idx < HASHSIZE; idx++) {
+
+			for (elt = hash->hashtab[idx]; elt != NULL;
+			     elt = elt_next) {
+
+				elt_next = elt->next;
+				mm_free(hash->mm, elt->val);
+				mm_free(hash->mm, elt->key);
+				mm_free(hash->mm, elt);
+			}
+
+			hash->hashtab[idx] = NULL;
+		}
+
+		mm_unlock(hash->mm);
+	}
+	return;
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_first_key
+
+   Returns the first key in a hash.
+   ---------------------------------------------------------------------
+*/
+
+SV *mm_hash_first_key(mm_hash *hash)
+{
+	SV *ret = &sv_undef;
+	unsigned int idx;
+
+	if (mm_lock(hash->mm, MM_LOCK_RD)) {
+
+		for (idx = 0; idx < HASHSIZE; idx++)
+
+			if (hash->hashtab[idx] != NULL) {
+				ret = newSVpv(hash->hashtab[idx]->key, 0);
+				break;
+			}
+
+		mm_unlock(hash->mm);
+	}
+	return(ret);
+}
+
+/* ---------------------------------------------------------------------
+   mm_hash_next_key
+
+   Returns next key in a hash.
+   ---------------------------------------------------------------------
+*/
+
+SV *mm_hash_next_key(mm_hash *hash, char *key)
+{
+	mm_hash_elt *elt;
+	unsigned int idx;
+	int found;
+
+	SV *ret = &sv_undef;
+
+	if (mm_lock(hash->mm, MM_LOCK_RD)) {
+
+		MM_HASH(idx, key, strlen(key));
+
+		found = 0;
+		for (; idx < HASHSIZE; idx++) {
+
+			for (elt = hash->hashtab[idx]; elt != NULL;
+			     elt = elt->next) {
+
+				if (found) {
+					ret = newSVpv(elt->key, 0);
+					break;
+				} else if (strcmp(key, elt->key) == 0) {
+
+					if (elt->next != NULL) {
+						ret = newSVpv(elt->next->key, 0);
+						break;
+					}
+					found = 1;
+				}
+			}
+
+			if (ret != &sv_undef)
+				break;
+		}
+
+		mm_unlock(hash->mm);
+	}
+
+	return(ret);
+}
+
+/* ---------------------------------------------------------------------
+   mm_free_hash
+
+   Frees all the memory used by the hash.
+   ---------------------------------------------------------------------
+*/
+
+void mm_free_hash(mm_hash *hash)
+{
+	mm_hash_clear(hash);
+	mm_free(hash->mm, hash);
+}
+
+
 
 MODULE = IPC::MM		PACKAGE = IPC::MM		
 
@@ -533,3 +887,53 @@ mm_display_info(mm)
 	MM *mm
 
 
+mm_hash *
+mm_make_hash(mm)
+	MM *mm
+
+void
+mm_free_hash(hash)
+	mm_hash *hash
+
+void
+mm_hash_clear(hash)
+	mm_hash *hash
+
+SV *
+mm_hash_get_value(hash, key)
+	mm_hash *hash
+	char *key
+
+int
+mm_hash_insert(hash, key, val)
+	mm_hash *hash
+	char *key
+	SV *val
+
+SV *
+mm_hash_delete(hash, key)
+	mm_hash *hash
+	char *key
+
+SV *
+mm_hash_exists(hash, key)
+	mm_hash *hash
+	char *key
+
+SV *
+mm_hash_first_key(hash)
+	mm_hash *hash
+
+SV *
+mm_hash_next_key(hash, key)
+	mm_hash *hash
+	char *key
+
+int
+mm_lock(mm, mode)
+	MM *mm
+	mm_lock_mode mode
+
+int
+mm_unlock(mm)
+	MM *mm

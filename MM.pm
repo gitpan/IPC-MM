@@ -30,12 +30,23 @@ require AutoLoader;
 	mm_btree_table_exists
 	mm_btree_table_first_key
 	mm_btree_table_next_key
+	mm_make_hash
+	mm_free_hash
+	mm_hash_get
+	mm_hash_insert
+	mm_hash_delete
+	mm_hash_clear
+	mm_hash_exists
+	mm_hash_first_key
+	mm_hash_next_key
+	mm_lock
+	mm_unlock
 	mm_maxsize
 	mm_available
 	mm_error
 	mm_display_info
 );
-$VERSION = '0.01';
+$VERSION = '0.02';
 
 sub AUTOLOAD {
     # This AUTOLOAD is used to 'autoload' constants from the constant()
@@ -150,6 +161,73 @@ sub IPC::MM::BTree::NEXTKEY
 sub IPC::MM::BTree::DESTROY
 {
 }
+
+# ---------------------
+
+sub IPC::MM::Hash::TIEHASH
+{
+	my $self = shift;
+	my $hash = shift or croak("TIEHASH: no hash reference");
+	my $obj = {
+		HASH => $hash
+	};
+	return bless $obj, $self;
+}
+
+sub IPC::MM::Hash::FETCH
+{
+	my $self = shift;
+	my $key = shift;
+	return(IPC::MM::mm_hash_get_value($self->{HASH}, $key));
+}
+
+sub IPC::MM::Hash::STORE
+{
+	my $self = shift;
+	my $key = shift;
+	my $val = shift;
+	IPC::MM::mm_hash_insert($self->{HASH}, $key, $val)
+	    or croak("mm_hash_insert: " . &IPC::MM::mm_error);
+}
+
+sub IPC::MM::Hash::DELETE
+{
+	my $self = shift;
+	my $key = shift;
+	return(IPC::MM::mm_hash_delete($self->{HASH}, $key));
+}
+
+sub IPC::MM::Hash::CLEAR
+{
+	my $self = shift;
+	IPC::MM::mm_hash_clear($self->{HASH});
+}
+
+sub IPC::MM::Hash::EXISTS
+{
+	my $self = shift;
+	my $key = shift;
+	return(IPC::MM::mm_hash_exists($self->{HASH}, $key));
+}
+
+sub IPC::MM::Hash::FIRSTKEY
+{
+	my $self = shift;
+	return(IPC::MM::mm_hash_first_key($self->{HASH}));
+}
+
+sub IPC::MM::Hash::NEXTKEY
+{
+	my $self = shift;
+	my $key = shift;
+	return(IPC::MM::mm_hash_next_key($self->{HASH}, $key));
+}
+
+sub IPC::MM::Hash::DESTROY
+{
+}
+
+# ---------------------
 
 
 
