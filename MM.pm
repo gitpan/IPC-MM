@@ -45,8 +45,10 @@ require AutoLoader;
 	mm_available
 	mm_error
 	mm_display_info
+	MM_LOCK_RD
+	MM_LOCK_RW
 );
-$VERSION = '0.02';
+$VERSION = '0.03';
 
 sub AUTOLOAD {
     # This AUTOLOAD is used to 'autoload' constants from the constant()
@@ -66,7 +68,7 @@ sub AUTOLOAD {
 		croak "Your vendor has not defined MM macro $constname";
 	}
     }
-    *$AUTOLOAD = sub () { $val };
+    eval "sub $AUTOLOAD { $val }";
     goto &$AUTOLOAD;
 }
 
@@ -258,6 +260,10 @@ IPC::MM - Perl interface to Ralf Engelschall's mm library
   tie %tied_hash, 'IPC::MM::BTree', $btree;
   $tied_hash{key} = 'val';
 
+  $hash = mm_make_hash($mm);
+  tie %tied_hash, 'IPC::MM::Hash', $hash;
+  $tied_hash{key} = 'val';
+
   $num = mm_maxsize();
 
   $num = mm_available($mm);
@@ -385,6 +391,62 @@ It is possible to tie a btree to a hash, like so:
 
 One interesting characteristic of the btree is that it is presorted, so
 keys %tied_hash will return a sorted list of items.
+
+=item $hash = mm_make_hash($mm)
+
+=item mm_hash_clear($hash)
+
+=item mm_free_hash($hash)
+
+=item $val = mm_hash_get($hash, $key)
+
+=item $rc = mm_hash_insert($hash, $key, $val)
+
+=item $oldval = mm_hash_delete($hash, $key)
+
+=item $rc = mm_hash_exists($hash, $key)
+
+=item $key = mm_hash_first_key($hash)
+
+=item $key = mm_hash_next_key($hash, $key)
+
+This family of methods implements a shared memory hash list. These hash lists
+are not presorted like btrees, but they can be faster than btrees (especially
+unbalanced btrees).
+
+I<mm_make_hash> allocates the data structure.
+
+I<mm_clear_hash> clears the data structure, making it empty.
+
+I<mm_free_hash> frees the data structure.
+
+I<mm_hash_get> returns the value associated with I<$key>.
+
+I<mm_hash_insert> inserts a new entry into the hash, with I<$key>
+equal to I<$val>.
+
+I<mm_hash_delete> deletes the entry in the hash identified by I<$key>.
+
+I<mm_hash_exists> tests for the existence of an entry in the hash
+identified by I<$key>.
+
+I<mm_hash_first_key> returns the first key in the hash.
+
+I<mm_hash_next_key> returns the next key after I<$key> in the hash.
+
+It is possible to tie a shared-memory hash to a perl hash, like so:
+
+  tie %tied_hash, 'IPC::MM::Hash', $hash;
+
+=item $rc = mm_lock($mm, $mode)
+
+This method locks the shared memory pool $mm for the current process in order
+to perform either shared/read-only (mode MM_LOCK_RD) or exclusive/read-write
+(mode MM_LOCK_RW) operations.
+
+=item $rc = mm_unlock($mm)
+
+This method unlocks the shared memory pool $mm.
 
 =item $num = mm_maxsize
 

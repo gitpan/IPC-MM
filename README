@@ -1,3 +1,17 @@
+WHAT'S EVEN NEWER
+
+I received another patch from Matthew Reimer <mreimer@vpop.net> which
+includes docs and a bug fix that makes mm_lock() and mm_unlock() work.
+
+I also replaced references to the deprecated sv_* with the recommended
+PL_sv_*.
+
+--
+Arthur Choung
+August 11, 2000
+
+----------
+
 WHAT'S NEW
 
 I received an email from Matthew Reimer <mreimer@vpop.net> containing a patch

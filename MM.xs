@@ -16,6 +16,8 @@ char *s;
     return -1;
 }
 
+#include <mm.h>
+
 static double
 constant(name, arg)
 char *name;
@@ -26,18 +28,10 @@ int arg;
 
     case 'M':
         if (strEQ(name, "MM_LOCK_RD"))
-#ifdef MM_LOCK_RD
             return MM_LOCK_RD;
-#else
-            goto not_there;
-#endif
 
         if (strEQ(name, "MM_LOCK_RW"))
-#ifdef MM_LOCK_RW
             return MM_LOCK_RW;
-#else
-            goto not_there;
-#endif
 
     }
     errno = EINVAL;
@@ -47,8 +41,6 @@ not_there:
     errno = ENOENT;
     return 0;
 }
-
-#include <mm.h>
 
 typedef struct {
 	MM *mm;
@@ -84,14 +76,14 @@ void mm_free_scalar(mm_scalar *scalar)
 SV *mm_scalar_get_core(mm_scalar *scalar)
 {
 	if (!scalar->data || !scalar->size)
-		return(&sv_undef);
+		return(&PL_sv_undef);
 
 	return(newSVpvn(scalar->data, scalar->size));
 }
 
 SV *mm_scalar_get(mm_scalar *scalar)
 {
-	SV *sv = &sv_undef;
+	SV *sv = &PL_sv_undef;
 	if (mm_lock(scalar->mm, MM_LOCK_RD)) {
 		sv = mm_scalar_get_core(scalar);
 		mm_unlock(scalar->mm);
@@ -303,12 +295,12 @@ SV *mm_btree_table_get_core(mm_btree *btree, char *key)
 	elt.key = key;
 	elt.val = 0;
 	match = mm_btree_get(btree, &elt);
-	return((match && match->val) ? mm_scalar_get_core(match->val) : &sv_undef);
+	return((match && match->val) ? mm_scalar_get_core(match->val) : &PL_sv_undef);
 }
 
 SV *mm_btree_table_get(mm_btree *btree, char *key)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 	if (mm_lock(btree->mm, MM_LOCK_RD)) {
 		ret = mm_btree_table_get_core(btree, key);
 		mm_unlock(btree->mm);
@@ -360,7 +352,7 @@ int mm_btree_table_insert(mm_btree *btree, char *key, SV *val)
 
 SV *mm_btree_table_delete(mm_btree *btree, char *key)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 	mm_btree_elt *old = 0;
 	if (mm_lock(btree->mm, MM_LOCK_RW)) {
 		table_entry elt;
@@ -384,12 +376,12 @@ SV *mm_btree_table_delete(mm_btree *btree, char *key)
 SV *
 mm_btree_table_exists(mm_btree *btree, char *key)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 	if (mm_lock(btree->mm, MM_LOCK_RD)) {
 		table_entry elt;
 		elt.key = key;
 		elt.val = 0;
-		ret = (mm_btree_get_core(btree, btree->root, &elt)) ? &sv_yes : &sv_no;
+		ret = (mm_btree_get_core(btree, btree->root, &elt)) ? &PL_sv_yes : &PL_sv_no;
 		mm_unlock(btree->mm);
 	}
 	return(ret);
@@ -401,12 +393,12 @@ SV *mm_btree_table_first_key_core(mm_btree *btree, mm_btree_elt *elt)
 	if (elt->prev)
 		return(mm_btree_table_first_key_core(btree, elt->prev));
 	telt = elt->curr;
-	return((telt && telt->key) ? newSVpv(telt->key, 0) : &sv_undef);
+	return((telt && telt->key) ? newSVpv(telt->key, 0) : &PL_sv_undef);
 }
 
 SV *mm_btree_table_first_key(mm_btree *btree)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 	if (mm_lock(btree->mm, MM_LOCK_RD)) {
 		if (btree->root)
 			ret = mm_btree_table_first_key_core(btree, btree->root);
@@ -420,17 +412,17 @@ SV *mm_btree_table_next_key_core(mm_btree *btree, mm_btree_elt *elt)
 	if (elt->parent && elt->parent->prev == elt) {
 		table_entry *telt;
 		telt = elt->parent->curr;
-		return((telt && telt->key) ? newSVpv(telt->key, 0) : &sv_undef);
+		return((telt && telt->key) ? newSVpv(telt->key, 0) : &PL_sv_undef);
 	} else if (elt->parent && elt->parent->next == elt) {
 		return(mm_btree_table_next_key_core(btree, elt->parent));
 	} else {
-		return(&sv_undef);
+		return(&PL_sv_undef);
 	}
 }
 
 SV *mm_btree_table_next_key(mm_btree *btree, char *key)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 	if (mm_lock(btree->mm, MM_LOCK_RD)) {
 		mm_btree_elt *elt;
 		table_entry telt;
@@ -533,7 +525,7 @@ mm_hash_elt *mm_hash_get(mm_hash *hash, void *key)
 SV *mm_hash_get_value(mm_hash *hash, char *key)
 {
 	mm_hash_elt *elt;
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 
 	if (mm_lock(hash->mm, MM_LOCK_RD)) {
 		elt = mm_hash_get(hash, key);
@@ -554,12 +546,12 @@ SV *mm_hash_get_value(mm_hash *hash, char *key)
 SV *mm_hash_exists(mm_hash *hash, char *key)
 {
 	mm_hash_elt *elt;
-	SV *ret = &sv_no;
+	SV *ret = &PL_sv_no;
 
 	if (mm_lock(hash->mm, MM_LOCK_RD)) {
 		elt = mm_hash_get(hash, key);
 		if (elt != NULL)
-			ret = &sv_yes;
+			ret = &PL_sv_yes;
 		mm_unlock(hash->mm);
 	}
 
@@ -657,7 +649,7 @@ int mm_hash_insert(mm_hash *hash, char *key, SV *val)
 
 SV *mm_hash_delete(mm_hash *hash, char *key)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 
 	if (mm_lock(hash->mm, MM_LOCK_RW)) {
 		mm_hash_remove(hash, key);
@@ -708,7 +700,7 @@ void mm_hash_clear(mm_hash *hash)
 
 SV *mm_hash_first_key(mm_hash *hash)
 {
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 	unsigned int idx;
 
 	if (mm_lock(hash->mm, MM_LOCK_RD)) {
@@ -738,7 +730,7 @@ SV *mm_hash_next_key(mm_hash *hash, char *key)
 	unsigned int idx;
 	int found;
 
-	SV *ret = &sv_undef;
+	SV *ret = &PL_sv_undef;
 
 	if (mm_lock(hash->mm, MM_LOCK_RD)) {
 
@@ -763,7 +755,7 @@ SV *mm_hash_next_key(mm_hash *hash, char *key)
 				}
 			}
 
-			if (ret != &sv_undef)
+			if (ret != &PL_sv_undef)
 				break;
 		}
 
